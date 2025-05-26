@@ -1,61 +1,66 @@
-from flask import Flask, render_template, request, send_file
-from utils import compare_spec_coa
-import os
+import fitz  # PyMuPDF
+import re
+import pandas as pd
+from difflib import get_close_matches
 
-app = Flask(__name__)
-UPLOAD_FOLDER = 'uploads'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+def extract_text_from_pdf(path):
+    doc = fitz.open(path)
+    text = ""
+    for page in doc:
+        text += page.get_text()
+    return text
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+def extract_tests(text):
+    pattern = re.compile(r"(\d{1,2}\.\d{1,2}|\d{1,2}\.0)\s+(.*?)\s{2,}(.*)")
+    tests = []
+    for match in pattern.finditer(text):
+        test_number, test_name, spec = match.groups()
+        tests.append({"Test Name": test_name.strip(), "Spec": spec.strip()})
+    return tests
 
-@app.route('/compare', methods=['POST'])
-def compare():
-    spec_file = request.files['spec_pdf']
-    coa_file = request.files['coa_pdf']
+def extract_results(text):
+    pattern = re.compile(r"(\d{1,2}\.\d{1,2}|\d{1,2}\.0)\s+(.*?)\s{2,}(.*)")
+    results = []
+    for match in pattern.finditer(text):
+        test_number, test_name, result = match.groups()
+        results.append({"Test Name": test_name.strip(), "Result": result.strip()})
+    return results
 
-    spec_path = os.path.join(UPLOAD_FOLDER, spec_file.filename)
-    coa_path = os.path.join(UPLOAD_FOLDER, coa_file.filename)
+def compare_spec_coa(spec_tests, coa_results):
+    df = pd.DataFrame(spec_tests)
+    df["Result"] = ""
+    df["Status"] = ""
 
-    spec_file.save(spec_path)
-    coa_file.save(coa_path)
+    for i, row in df.iterrows():
+        match = get_close_matches(row["Test Name"], [r["Test Name"] for r in coa_results], n=1, cutoff=0.8)
+        if match:
+            result = next((r for r in coa_results if r["Test Name"] == match[0]), None)
+            df.at[i, "Result"] = result["Result"]
+            df.at[i, "Status"] = "✅ Match" if row["Spec"] in result["Result"] or result["Result"] in row["Spec"] else "❌ Deviation"
+        else:
+            df.at[i, "Result"] = "Not Found"
+            df.at[i, "Status"] = "❌ Missing"
 
-    table, excel_path = compare_spec_coa(spec_path, coa_path)
+    return df
 
-    return render_template('index.html', table=table, excel_link=excel_path)
+def main():
+    spec_pdf = "fp_spec.pdf"  # Replace with your actual filename
+    coa_pdf = "coa.pdf"       # Replace with your actual filename
 
-@app.route('/download/<path:filename>')
+    spec_text = extract_text_from_pdf(spec_pdf)
+    coa_text = extract_text_from_pdf(coa_pdf)
 
-# Assume your Flask app ('app') is defined above this
-# For example:
-# from flask import Flask, send_file
-# app = Flask(__name__)
-#
-# @app.route('/')
-# def hello():
-#     return "Hello from Flask!"
-#
-# @app.route('/download/<filename>') # Example route using send_file
-# def download_file(filename):
-#    # IMPORTANT: Ensure 'filename' is safe and points to an actual, intended file.
-#    # Add security checks here to prevent directory traversal attacks.
-#    # For example, ensure the filename is within a specific allowed directory.
-#    # For simplicity, this example assumes 'filename' is just the name of a file
-#    # in the same directory or a pre-defined safe path.
-#    try:
-#        return send_file(filename, as_attachment=True)
-#    except FileNotFoundError:
-#        return "File not found", 404
+    spec_data = extract_tests(spec_text)
+    coa_data = extract_results(coa_text)
 
-# The critical change is in the app.run() call:
-if __name__ == '__main__':
-    # Disable the Werkzeug reloader and debugger when running in an environment
-    # like Streamlit, which manages its own execution.
-    # The reloader (part of debug=True) causes the signal error.
-    app.run(debug=False, use_reloader=False, host='0.0.0.0', port=5000) # MODIFIED LINE
-def download(filename):
-    return send_file(filename, as_attachment=True)
+    result_df = compare_spec_coa(spec_data, coa_data)
 
-if __name__ == '__main__':
-    app.run(debug=True)
+    print("\n📋 Comparison Table:\n")
+    print(result_df.to_string(index=False))
+
+    result_df.to_excel("comparison_result.xlsx", index=False)
+    print("\n✅ Saved as 'comparison_result.xlsx'")
+
+if __name__ == "__main__":
+    main()
+
