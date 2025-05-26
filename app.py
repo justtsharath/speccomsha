@@ -1,3 +1,5 @@
+pip install pymupdf pandas openpyxl
+
 import fitz  # PyMuPDF
 import re
 import pandas as pd
