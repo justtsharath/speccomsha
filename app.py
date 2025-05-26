@@ -1,3 +1,9 @@
+ import fitz  # PyMuPDF
+except ImportError:
+    import subprocess
+    import sys
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pymupdf"])
+    import fitz
 import streamlit as st
 import fitz  # PyMuPDF
 import re
