@@ -1,5 +1,3 @@
-pip install streamlit pymupdf pandas openpyxl
-
 import streamlit as st
 import fitz  # PyMuPDF
 import re
